@@ -1,0 +1,408 @@
+<title>Multi-Tool Orchestrator Agent — capability routing, permission scoping, conflict resolution</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --paper: #f5f4f8;
+    --panel: #ffffff;
+    --ink: #1b1a22;
+    --ink-soft: #55536a;
+    --ink-faint: #8b899c;
+    --line: #dedbe8;
+    --accent: #5b3fd6;
+    --accent-soft: #ece8fb;
+    --accent-2: #b5591b;
+    --accent-2-soft: #f6e9dd;
+    --accent-3: #1f7a63;
+    --accent-3-soft: #e2f2ec;
+    --code-bg: #191726;
+    --code-ink: #e4e0f5;
+    --code-line: #2a2740;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --font-body: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #15131c;
+      --panel: #1c1a26;
+      --ink: #ece9f5;
+      --ink-soft: #a8a4bd;
+      --ink-faint: #726f89;
+      --line: #2d2a3c;
+      --accent: #a48af5;
+      --accent-soft: #26213c;
+      --accent-2: #e2924f;
+      --accent-2-soft: #2e2419;
+      --accent-3: #56c9a8;
+      --accent-3-soft: #172a24;
+      --code-bg: #100e19;
+      --code-ink: #d9d4ef;
+      --code-line: #241f38;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #15131c; --panel: #1c1a26; --ink: #ece9f5; --ink-soft: #a8a4bd; --ink-faint: #726f89;
+    --line: #2d2a3c; --accent: #a48af5; --accent-soft: #26213c; --accent-2: #e2924f; --accent-2-soft: #2e2419;
+    --accent-3: #56c9a8; --accent-3-soft: #172a24; --code-bg: #100e19; --code-ink: #d9d4ef; --code-line: #241f38;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --paper: #f5f4f8; --panel: #ffffff; --ink: #1b1a22; --ink-soft: #55536a; --ink-faint: #8b899c;
+    --line: #dedbe8; --accent: #5b3fd6; --accent-soft: #ece8fb; --accent-2: #b5591b; --accent-2-soft: #f6e9dd;
+    --accent-3: #1f7a63; --accent-3-soft: #e2f2ec; --code-bg: #191726; --code-ink: #e4e0f5; --code-line: #2a2740;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 24px 100px; overflow-x: hidden; }
+
+  header.masthead { padding: 56px 0 28px; border-bottom: 1px solid var(--line); margin-bottom: 40px; }
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 14px;
+  }
+  h1 { font-family: var(--font-mono); font-size: 29px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 14px; text-wrap: balance; }
+  .tagline { font-size: 18px; color: var(--ink-soft); margin: 0 0 24px; max-width: 62ch; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+  .badge {
+    font-family: var(--font-mono); font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--ink-soft); background: var(--panel);
+  }
+
+  h2 { font-family: var(--font-mono); font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .subhead { font-family: var(--font-body); font-style: italic; font-size: 16px; color: var(--ink-faint); margin: 0 0 20px; }
+  section { margin: 56px 0; }
+  section#top-grid { margin-top: 0; }
+  p { margin: 0 0 16px; }
+  a { color: var(--accent); }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+  strong { font-weight: 600; }
+
+  .spec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .spec-cell { background: var(--panel); padding: 16px 18px; }
+  .spec-cell dt { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 6px; }
+  .spec-cell dd { margin: 0; font-size: 15px; }
+
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0;
+    padding: 14px 18px; margin: 20px 0;
+  }
+  .callout .label { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; margin: 0 0 8px; color: var(--accent); }
+  .callout p { margin: 0; font-size: 15px; color: var(--ink-soft); }
+
+  .term {
+    background: var(--code-bg); color: var(--code-ink); border-radius: 8px; padding: 16px 18px;
+    font-family: var(--font-mono); font-size: 13px; line-height: 1.7; overflow-x: auto; margin: 16px 0;
+  }
+  .term .prompt { color: var(--accent); }
+  .term .dim { color: #8f8aad; }
+  .term .warn { color: #e2b25a; }
+  .term .crit { color: #e08a6a; }
+  .term .ok { color: #7fd6b8; }
+  .term .comment { color: #6f6b8c; }
+
+  pre.block { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; margin: 16px 0; }
+
+  table.cmp { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14.5px; }
+  table.cmp th, table.cmp td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  table.cmp th { font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-faint); background: var(--panel); }
+  table.cmp td { background: var(--panel); }
+  table.cmp code { white-space: nowrap; }
+
+  /* architecture diagram, pure CSS/HTML - no external renderer needed */
+  .flow { display: flex; flex-direction: column; align-items: stretch; gap: 0; margin: 20px 0; }
+  .flow-row { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+  .fbox {
+    font-family: var(--font-mono); font-size: 13px; padding: 10px 14px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel); text-align: center; min-width: 120px;
+  }
+  .fbox.accent { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .fbox.warn { border-color: var(--accent-2); background: var(--accent-2-soft); color: var(--accent-2); }
+  .fbox.ok { border-color: var(--accent-3); background: var(--accent-3-soft); color: var(--accent-3); }
+  .farrow { font-family: var(--font-mono); color: var(--ink-faint); font-size: 13px; padding: 4px 0; text-align: center; }
+  .flabel { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); text-align: center; }
+  .fbranch { display: flex; justify-content: center; gap: 60px; margin: 4px 0; }
+  .fbranch-col { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+
+  .policy-card { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 10px 0; background: var(--panel); }
+  .policy-card .pname { font-family: var(--font-mono); font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+
+  footer { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 24px; color: var(--ink-faint); font-size: 14px; }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Portfolio project · coordinating complex workflows</p>
+  <h1>Multi-Tool Orchestrator Agent</h1>
+  <p class="tagline">
+    A research-concierge agent that manages a <em>dynamic</em> fleet of tools: they register
+    themselves at runtime with capability tags, requests route by capability instead of
+    hard-coded tool names, execution respects a per-session permission scope, independent
+    tool calls run in parallel, and contradictory results from overlapping tools go through
+    an explicit, auditable conflict-resolution policy.
+  </p>
+  <div class="badges">
+    <span class="badge">Python 3.11+</span>
+    <span class="badge">LangGraph StateGraph</span>
+    <span class="badge">langchain-ollama · qwen3.5:9b (local)</span>
+    <span class="badge">asyncio parallel fan-out</span>
+    <span class="badge">pydantic manifests</span>
+    <span class="badge">uv + pytest</span>
+  </div>
+</header>
+
+<section id="top-grid">
+  <div class="spec-grid">
+    <div class="spec-cell"><dt>Demo domain</dt><dd>8 mock tools: 3 weather providers, currency, calculator, file reader, web search, note writer, mock email</dd></div>
+    <div class="spec-cell"><dt>Default test run</dt><dd><code>uv run pytest</code> — 40 tests, ~1s, zero network</dd></div>
+    <div class="spec-cell"><dt>Live tests</dt><dd><code>uv run pytest -m integration</code> — 2 end-to-end requests against a real local model</dd></div>
+    <div class="spec-cell"><dt>Entry point</dt><dd><code>orc tools</code> · <code>orc run "…"</code> · <code>orc demo</code></dd></div>
+  </div>
+</section>
+
+<section id="why">
+  <h2>01 · Why capability routing, not a tool switchboard</h2>
+  <p class="subhead">The difference between adding a tool and touching the orchestrator</p>
+  <p>
+    The obvious way to build a "multi-tool agent" is a big <code>if/elif</code> or a
+    hand-maintained dispatch table mapping intents to specific tool functions. It works for a
+    demo and rots immediately: every new tool means a code change in the router, the prompt,
+    and usually the permission logic too. It also can't express the case that actually matters
+    in production — <em>two tools that do the same job</em>, so you can fail over, A/B, or
+    cross-check them.
+  </p>
+  <p>
+    This orchestrator inverts that. Tools carry <strong>capability tags</strong>
+    (<code>weather.current</code>, <code>currency.convert</code>, <code>note.write</code>, …)
+    declared once in a <code>@tool_def</code> decorator alongside a permission scope, a
+    priority, and a timeout. The planner LLM never emits a tool name — it decomposes the
+    request into subtasks tagged only with capabilities, and a separate router resolves
+    <em>capability → whichever tools are currently registered for it</em>, read fresh from the
+    registry on every request. Two tools can share a capability on purpose (both weather
+    providers do); the router either calls the higher-priority one or calls both, depending on
+    policy.
+  </p>
+  <div class="callout">
+    <p class="label">What this buys you</p>
+    <p>
+      Adding a ninth tool — a new weather provider, a calendar lookup, anything — is one
+      decorator and zero changes to <code>planner.py</code>, <code>router.py</code>, or the
+      graph. The planner's prompt is generated from <code>registry.capability_catalog()</code>
+      at call time, so a tool registered five seconds ago is something the very next planning
+      call can route to. Milestone 5's demo proves this by registering a third weather
+      provider <em>mid-process</em> and re-running the same request.
+    </p>
+  </div>
+</section>
+
+<section id="architecture">
+  <h2>02 · Architecture</h2>
+  <p class="subhead">A LangGraph <code>StateGraph</code> with two conditional edges doing real work</p>
+  <div class="flow">
+    <div class="flow-row"><div class="fbox">User request + session scope</div></div>
+    <div class="farrow">↓</div>
+    <div class="flow-row"><div class="fbox accent">planner</div></div>
+    <div class="flabel">qwen3.5:9b · JSON mode · decomposes into capability-tagged subtasks</div>
+    <div class="farrow">↓</div>
+    <div class="flow-row"><div class="fbox">router</div><span class="flabel" style="align-self:center">← registry (live, runtime-mutable)</span></div>
+    <div class="flabel">capability → candidate tool(s), by priority or "call every candidate"</div>
+    <div class="farrow">↓</div>
+    <div class="flow-row"><div class="fbox warn">permission gate</div></div>
+    <div class="fbranch">
+      <div class="fbranch-col">
+        <div class="flabel">denied, unseen before</div>
+        <div class="farrow">↺</div>
+        <div class="flabel">back to planner (max 1 replan)</div>
+      </div>
+      <div class="fbranch-col">
+        <div class="flabel">allowed</div>
+        <div class="farrow">↓</div>
+        <div class="fbox">executor</div>
+        <div class="flabel">dependency-batched, <code>asyncio.gather</code> per batch</div>
+      </div>
+    </div>
+    <div class="farrow">↓</div>
+    <div class="flow-row"><div class="fbox">check conflicts</div></div>
+    <div class="fbranch">
+      <div class="fbranch-col">
+        <div class="flabel">divergent same-subtask results</div>
+        <div class="farrow">↓</div>
+        <div class="fbox ok">resolver</div>
+        <div class="flabel">priority / freshest / llm_adjudicate</div>
+      </div>
+      <div class="fbranch-col">
+        <div class="flabel">no conflict</div>
+      </div>
+    </div>
+    <div class="farrow">↓</div>
+    <div class="flow-row"><div class="fbox accent">aggregator</div></div>
+    <div class="flabel">synthesizes the final answer from a Python-built factual digest — wording is the LLM's job, facts never are</div>
+  </div>
+  <p>
+    The two conditional edges (<code>permission_gate → planner</code> and
+    <code>check_conflicts → resolver</code>) are the graph doing something a linear pipeline
+    can't: routing on data it only knows after execution starts, not on a pre-drawn diagram.
+  </p>
+</section>
+
+<section id="permissions">
+  <h2>03 · Permission scoping as a planner input, not a runtime crash</h2>
+  <p class="subhead">Denials are structured data the planner adapts to</p>
+  <p>
+    Every tool declares one <code>ScopeClass</code>: <code>read</code> (querying data, no side
+    effects — weather, currency, calculator, file reads), <code>network</code> (an external,
+    less-trusted call — web search), or <code>write</code> (a real side effect — writing a
+    note, sending an email). A session grants a subset, e.g.
+    <code>--scope read,network</code>.
+  </p>
+  <p>
+    The permission gate doesn't reject a request outright when a scope is missing. It produces
+    a structured <code>Denial</code> — which tool, which capability, which scope was required —
+    for every candidate it drops. If a subtask is left with <em>zero</em> runnable candidates,
+    the graph routes back to the planner exactly once, with those denials appended to its
+    prompt: "these capabilities are unavailable this session, drop what needs them and say what
+    you couldn't do." The bound to one replan matters as much as the replan itself — a 9B model
+    given an open-ended retry loop will sometimes retry the same denied capability forever;
+    capping it means the worst case is one wasted planning call, not a hang.
+  </p>
+  <p>
+    A capability the router can't find <em>any</em> tool for at all (the model hallucinated a
+    capability outside the catalog) is handled differently — as an honest failure recorded in
+    the execution report, not a replan trigger, since retrying rarely fixes a hallucination and
+    a bounded retry budget is better spent on real denials.
+  </p>
+  <table class="cmp">
+    <tr><th>Scope</th><th>Tools</th><th>Example denial</th></tr>
+    <tr><td><code>read</code></td><td>weather × 3, currency, calculator, file reader</td><td>—</td></tr>
+    <tr><td><code>network</code></td><td>web search</td><td>—</td></tr>
+    <tr><td><code>write</code></td><td>note writer, mock email</td><td><code>--scope read</code> denies both; planner drops the note/email subtask and says so in the final answer</td></tr>
+  </table>
+</section>
+
+<section id="parallel">
+  <h2>04 · Parallel execution and conflict resolution</h2>
+  <p class="subhead">Real concurrency, proven with timestamps — and an explicit policy when tools disagree</p>
+  <p>
+    Subtasks form a dependency DAG via an optional <code>depends_on</code> list (a note that
+    summarizes results depends on the subtasks that produced them; independent lookups don't
+    depend on anything). The executor topologically sorts subtasks into batches and runs every
+    call in a batch concurrently with <code>asyncio.gather</code>; each call is individually
+    wrapped in its own <code>try/except</code> and <code>asyncio.wait_for</code>, so one tool's
+    timeout or bug produces a failed <code>ToolResult</code> for that call alone — it never
+    takes its batch mates down. <code>tests/test_executor.py</code> proves this two ways: fake
+    tools record their own start/finish timestamps and the test asserts real overlap (not just
+    that <code>asyncio.gather</code> was called), and a separate test injects a raising tool
+    into a batch and asserts its neighbor still succeeds.
+  </p>
+  <p>
+    The router can deliberately call <em>every</em> candidate for a capability
+    (<code>--router-mode all</code>, the default) rather than just the top-priority one — that
+    redundancy is what surfaces genuine disagreement between tools, which the resolver then has
+    to adjudicate under one of three policies:
+  </p>
+  <div class="policy-card">
+    <div class="pname">priority</div>
+    Picks the result from whichever tool has the higher configured <code>priority</code> in its
+    manifest. Deterministic, free, no model call — the right default when one provider is
+    simply known to be more trustworthy.
+  </div>
+  <div class="policy-card">
+    <div class="pname">freshest</div>
+    Picks the result whose payload carries the most recent <code>observed_at</code> timestamp.
+    The two built-in weather mocks are deliberately tuned so priority and freshest disagree
+    (the higher-priority provider is also the stalest one) — a realistic tradeoff, not a toy
+    example.
+  </div>
+  <div class="policy-card">
+    <div class="pname">llm_adjudicate</div>
+    Sends both candidate results to qwen3.5:9b and asks it to pick one and explain why, in
+    JSON mode with a one-shot repair retry. If the model names a tool that wasn't actually a
+    candidate (small models occasionally do this), the resolver rejects the hallucination and
+    falls back to the first candidate rather than propagating it; if the call fails outright,
+    it falls back the same way and says so plainly. The rationale is carried into the execution
+    report either way, so a reviewer can see <em>why</em> the agent trusted one number over
+    another.
+  </div>
+  <p>
+    Every run prints a batch-by-batch wall-time report — actual wall time next to a summed
+    per-call estimate of what running the same batch sequentially would have cost — and
+    <code>orc run --sequential</code> re-runs the same request with each batch executed one call
+    at a time, for an honest, actually-measured baseline rather than an estimate.
+  </p>
+</section>
+
+<section id="install">
+  <h2>05 · Install &amp; run</h2>
+  <div class="term">
+<span class="comment"># from the project root, with a local Ollama server already running</span>
+<span class="prompt">$</span> ollama pull qwen3.5:9b     <span class="dim"># if not already pulled</span>
+<span class="prompt">$</span> uv sync
+<span class="prompt">$</span> uv run pytest                <span class="dim"># 40 tests, ~1s, no network</span>
+<span class="prompt">$</span> uv run pytest -m integration <span class="dim"># 2 live end-to-end requests, several minutes</span>
+
+<span class="prompt">$</span> uv run orc tools             <span class="dim"># live registry: capabilities, scopes, priorities</span>
+<span class="prompt">$</span> uv run orc run "Compare the weather in Tokyo and Paris, convert 100 USD to JPY, save a note"
+<span class="prompt">$</span> uv run orc run "…" --scope read --resolve-policy llm_adjudicate
+<span class="prompt">$</span> uv run orc run "…" --sequential   <span class="dim"># wall-time baseline, no parallel batching</span>
+
+<span class="prompt">$</span> uv run orc demo               <span class="dim"># the full walkthrough below, one command</span>
+  </div>
+  <p>
+    The model name lives in exactly one place, <code>config.py</code>, overridable via
+    <code>ORCHESTRATOR_MODEL</code> for anyone running a different local model.
+  </p>
+</section>
+
+<section id="demo">
+  <h2>06 · Demo walkthrough</h2>
+  <p class="subhead"><code>orc demo</code> runs all five steps below, end to end, in one process</p>
+  <table class="cmp">
+    <tr><th>Step</th><th>What it shows</th></tr>
+    <tr><td>1</td><td><code>orc tools</code> — the live registry: 8 tools, their capabilities, scopes, and priorities.</td></tr>
+    <tr><td>2</td><td>A multi-part request (weather × 2 cities, currency conversion, a summary note) under full scope — the execution report shows the subtask plan, the parallel batches, and wall-time saved vs. a sequential estimate.</td></tr>
+    <tr><td>3</td><td>The identical request under <code>--scope read</code>, plus a second, single-purpose write request ("send an email confirming the trip") under the same restricted scope — a small local planner doesn't always keep an optional write-scoped subtask (the note) in a compound plan, so the dedicated request is what reliably shows the denial → bounded replan → "here's what I couldn't do" path end to end.</td></tr>
+    <tr><td>4</td><td>A weather-only request run three times, once per resolution policy — <code>priority</code> and <code>freshest</code> disagree with each other by design, and <code>llm_adjudicate</code> prints the model's own rationale for its pick.</td></tr>
+    <tr><td>5</td><td><strong>The money shot.</strong> A third weather provider, <code>weather_c</code>, is registered <em>mid-session</em> — after the registry has already been queried several times in this same process — and the very next run routes to it immediately. No restart, no cache invalidation, no code path touched outside the one call to <code>registry.register()</code>.</td></tr>
+  </table>
+  <div class="callout">
+    <p class="label">Honest limitation</p>
+    <p>
+      qwen3.5:9b is a small model asked to do structured multi-step planning. On a compound
+      request it will sometimes decide a "nice to have" subtask (the note) isn't worth
+      including, independent of scope — that's a planning-quality ceiling, not an orchestrator
+      bug, and it's why the permission-denial demo pairs the compound request with one that has
+      only a single, unavoidably write-scoped path.
+    </p>
+  </div>
+  <p>
+    Step 5 is the actual claim of the "dynamic fleet of tools" framing made concrete: the
+    registry is queried live on every planning call (<code>registry.capability_catalog()</code>
+    inside <code>planner.build_system_prompt</code>) and every routing call
+    (<code>registry.find_by_capability</code> inside <code>router.route</code>) — there is no
+    snapshot anywhere for a newly-registered tool to be stale against.
+  </p>
+</section>
+
+<footer>
+  <p>
+    <code>src/orchestrator/</code> — <code>registry.py</code> (decorator + runtime
+    register/unregister), <code>manifests.py</code> (pydantic contracts), <code>planner.py</code>,
+    <code>router.py</code>, <code>permissions.py</code>, <code>executor.py</code>,
+    <code>resolver.py</code>, <code>graph.py</code> (LangGraph wiring), <code>cli.py</code>,
+    <code>tools/</code> (the 8 mock demo tools). Tests mirror each module 1:1, plus
+    <code>test_integration.py</code> for the live end-to-end path.
+  </p>
+</footer>
+
+</div>
