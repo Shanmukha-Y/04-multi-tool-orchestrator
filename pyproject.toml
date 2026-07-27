@@ -1,0 +1,38 @@
+[project]
+name = "orchestrator"
+version = "0.1.0"
+description = "A multi-tool orchestrator agent: capability-based routing, permission-scoped execution, parallel dependency-aware batching, and conflict resolution over a dynamic tool registry."
+requires-python = ">=3.11"
+authors = [
+    { name = "Shanmukha Sai Sumanth Yenneti", email = "shanmukha.yenneti@gmail.com" }
+]
+dependencies = [
+    "langgraph>=0.2",
+    "langchain-ollama>=0.2",
+    "pydantic>=2.7",
+    "click>=8.1",
+    "rich>=13.7",
+]
+
+[project.scripts]
+orc = "orchestrator.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+asyncio_mode = "auto"
+markers = [
+    "integration: live tests that call a real Ollama server (slow, requires local model).",
+]
+timeout = 30

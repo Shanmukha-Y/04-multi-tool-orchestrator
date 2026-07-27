@@ -1,0 +1,5 @@
+Sample sandboxed data file for the `files` tool's file.read capability.
+
+Trip planning scratch notes:
+- Tokyo leg: 4 nights, check weather before packing.
+- Paris leg: 3 nights, budget 100 USD/day for food.

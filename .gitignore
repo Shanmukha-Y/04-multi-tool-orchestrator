@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+.uv/
+uv.lock.bak
+.DS_Store
+.ruff_cache/
+notes_output/*.md
+!notes_output/.gitkeep
