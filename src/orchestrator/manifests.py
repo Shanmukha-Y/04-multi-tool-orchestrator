@@ -140,6 +140,10 @@ class ExecutionReport(BaseModel):
 
     plan: Plan
     denials: list[Denial] = Field(default_factory=list)
+    unroutable: list[str] = Field(default_factory=list)
+    """Capabilities the planner emitted that have zero registered tools -
+    an "honest failure" path distinct from a permission denial: nothing to
+    gate, there's simply no candidate. Not replanned (see router.py)."""
     replans: int = 0
     batches: list[BatchReport] = Field(default_factory=list)
     results: list[ToolResult] = Field(default_factory=list)
