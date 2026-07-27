@@ -1,0 +1,22 @@
+{
+  "plan": {
+    "subtasks": [],
+    "notes": "The user's request to send an email confirming a trip booking cannot be completed. The email.send capability is denied by the session's permission scope (tool 'email_mock' needs 'write' scope). No alternative capabilities exist in the catalog that can generate or transmit booking confirmations. This task was dropped due to permission restrictions."
+  },
+  "denials": [
+    {
+      "subtask_id": "t1",
+      "capability": "email.send",
+      "tool": "email_mock",
+      "scope_required": "write",
+      "reason": "tool 'email_mock' requires 'write' scope, which this session does not grant (granted: read)"
+    }
+  ],
+  "unroutable": [],
+  "replans": 1,
+  "batches": [],
+  "results": [],
+  "conflicts": [],
+  "resolutions": [],
+  "answer": "I cannot send the trip booking confirmation email to ops@example.com. My current session lacks the necessary 'write' permission scope required by the email tool, and there are no alternative methods available in this environment to complete the task."
+}
