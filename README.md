@@ -1,39 +1,48 @@
 # Multi-Tool Orchestrator Agent
 
-Project 04 in a production-agent-skills series: an agent that orchestrates a dynamic fleet of tools — capability-based routing, permission-scoped execution with bounded replan on denial, parallel dependency-aware batching, and explicit conflict resolution when overlapping tools disagree.
+Project 04 in a production-agent engineering series: an agent that routes over a dynamic tool fleet using capabilities rather than tool names, applies scope checks before execution, batches independent work in parallel, and resolves conflicting provider results explicitly.
 
 ## What it does
 
-- **Capability routing, not a dispatch table.** Tools register themselves at runtime via a `@tool_def` decorator carrying capability tags (`weather.current`, `currency.convert`, ...), a permission scope, a priority, and a timeout. The planner LLM emits capabilities, never tool names; the router resolves capability → currently-registered tool(s) fresh from the registry on every request.
-- **Permission scoping as planner input, not a crash.** Each tool declares a `read` / `network` / `write` scope. A denied capability produces a structured `Denial` (tool, capability, scope) instead of an error; if a subtask has zero runnable candidates, the graph routes back to the planner exactly once with the denials appended to its prompt — bounded to one replan so a small model can't retry a denied capability forever.
-- **Parallel, fault-isolated execution.** Subtasks form a dependency DAG (`depends_on`); the executor topologically batches them and runs each batch with `asyncio.gather`, with each call individually wrapped in its own `try/except` + `asyncio.wait_for` so one tool's failure or timeout doesn't take its batch mates down.
-- **Explicit conflict resolution.** The router can call every candidate for a capability (default), and when results diverge, one of three policies adjudicates: `priority` (deterministic, manifest-configured), `freshest` (by payload timestamp), or `llm_adjudicate` (model picks and explains, with hallucinated-tool-name rejection and fallback).
-- **Live, not snapshotted, registry.** `registry.capability_catalog()` (planning) and `registry.find_by_capability()` (routing) both read the registry live on every call — a tool registered mid-session is routable on the very next request, no restart or cache invalidation.
+- **Capability routing rather than a dispatch table.** Tools register at runtime through a `@tool_def` decorator with capability tags, an execution scope, priority, and timeout. The planner requests capabilities; the router resolves them against the live registry.
+- **Structured permission denial.** Every tool declares a `read`, `network`, or `write` scope. A denied capability becomes a typed `Denial` that the planner can see. If no runnable candidate remains, the graph permits exactly one replan instead of retrying indefinitely.
+- **Parallel, fault-isolated execution.** Subtasks form a dependency DAG. Ready tasks run through `asyncio.gather`, while each call gets an independent timeout and exception boundary so one provider cannot take down its batch mates.
+- **Explicit conflict resolution.** In `ALL` mode the router can call every provider for a capability. Divergent results are resolved by manifest priority, data freshness, or LLM adjudication. A failed adjudicator or hallucinated tool name now falls back to deterministic manifest priority—not whichever result happened to appear first.
+- **Live registry semantics.** Planning and routing read the registry on every request, so a provider registered mid-process is eligible immediately without restarting or invalidating a cache.
 
 ## Quick start
 
-```
-# with a local Ollama server running
+```bash
 ollama pull qwen3.5:9b
 uv sync
-uv run pytest                 # 40 tests, ~1s, zero network
-uv run pytest -m integration  # 2 live end-to-end requests against qwen3.5:9b — requires a local Ollama instance serving that model, several minutes
 
-uv run orc tools               # live registry: capabilities, scopes, priorities
+# Fast unit and mocked-model suite
+uv run pytest
+
+# Live end-to-end tests
+uv run pytest -m integration
+
+uv run orc tools
 uv run orc run "Compare the weather in Tokyo and Paris, convert 100 USD to JPY, save a note"
 uv run orc run "..." --scope read --resolve-policy llm_adjudicate
-uv run orc run "..." --sequential   # wall-time baseline, no parallel batching
-uv run orc demo                 # full five-step walkthrough, one command
+uv run orc run "..." --sequential
+uv run orc demo
 ```
+
+## Authorization and trust boundary
+
+The `read` / `network` / `write` values are an orchestration policy demonstration, not a complete authorization system. The caller supplies allowed scopes; this project does not authenticate a human or workload identity, issue short-lived credentials, enforce resource-level permissions, protect secrets, or prevent a tool implementation from acting outside its declared manifest. In production, the executor—not the model and not a manifest string—must enforce least privilege through real identity, policy, network, and runtime controls.
+
+Tool payloads are also untrusted. An LLM adjudicator can be influenced by malicious content inside a provider response, and “freshest” is only useful when timestamps are trustworthy and comparable. High-stakes resolution should combine authenticated provenance, deterministic policy, domain-specific validation, and human review rather than relying on a model to decide which source is true.
 
 ## Learnings
 
-- **Rich markup injection ate LLM output.** Free-text answers/rationales from the model can contain literal square brackets, and Rich's console markup parser silently swallowed them — verified in practice: a resolution rationale printed to the terminal with its policy name deleted out of the middle of the sentence. Fix was to render all dynamic/LLM-sourced text with markup disabled rather than trying to escape it upstream.
-- **A bounded replan budget matters more than the replan itself.** An open-ended "retry until it works" loop on permission denial will, with a 9B model, sometimes retry the same denied capability indefinitely. Capping it at one replan makes the worst case a single wasted planning call instead of a hang, and a capability that no tool exists for at all (a hallucinated capability) is recorded as an honest failure rather than fed into the replan loop, since retrying doesn't fix a hallucination.
-- **Small-model planning has a real ceiling, and the demo had to be built around it.** On a compound request, qwen3.5:9b doesn't reliably keep an optional write-scoped subtask (a summary note) in the plan, independent of whether that scope is even granted — a planning-quality trait, not an orchestrator bug. The denial→replan path is only reliably exercised with a second, single-purpose write request ("send an email confirming the trip"), which is what `traces/demo_permission_denial_replan.json` captures: a live run where `email.send` is denied, zero alternative capabilities exist, and the agent returns an honest "I cannot do this" instead of failing or hallucinating success.
-- **`priority` and `freshest` are tuned to disagree on purpose.** The two built-in weather mocks have the higher-priority provider also be the stalest one, so the two deterministic resolution policies produce different answers on the same input — a deliberate, realistic tradeoff rather than a toy example where they'd always agree.
-- **`llm_adjudicate` needs a hallucination guard.** Asking the model to name which candidate tool it trusts occasionally gets a tool name back that wasn't actually a candidate; the resolver rejects that output and falls back to the first candidate (recording that it did so) rather than propagating a reference to a tool that was never called.
-- **Parallel batching was measured, not assumed.** A live run with 5 concurrent calls in a batch showed a 3.88x speedup versus the summed sequential-estimate baseline; `tests/test_executor.py` backs this with a timestamp-overlap assertion (not just that `asyncio.gather` was invoked) plus a fault-isolation test that injects a raising tool into a batch and asserts its neighbor still succeeds.
-- **Dynamic registration was verified live, not just unit-tested.** A third weather provider (`weather_c`) registered mid-process joined an existing two-way priority conflict and won under the `priority` policy on the very next request, with no restart and no code path touched outside the single call to `registry.register()`.
+- **Rich markup consumed model text.** Free-form rationales containing square brackets were interpreted by the terminal renderer. Dynamic model output is now printed with markup disabled.
+- **A bounded replan budget matters more than replanning alone.** A small model may repeatedly request a denied capability. One permitted replan converts an open-ended loop into one bounded extra planning call.
+- **Small-model planning has a real ceiling.** The model did not reliably preserve an optional write subtask in a compound plan, so the denial demonstration uses a focused write request and reports that limitation instead of hiding it.
+- **Priority and freshness deliberately disagree in the fixtures.** The higher-priority weather provider is also the older one, making the policy trade-off observable.
+- **LLM adjudication needs a deterministic fallback.** Invalid candidate names and transport failures now select the highest-priority registered candidate and record why the fallback occurred.
+- **Parallelism was measured rather than inferred.** A live five-call batch achieved a 3.88× speedup over the summed sequential estimate; tests assert temporal overlap and neighbor survival when one tool raises.
+- **Dynamic registration was verified live.** A third weather provider registered mid-process participated in the next conflict and won under priority without a restart.
 
-See `readme.html` for the full write-up, architecture diagram, and permission/conflict-resolution tables.
+See [`readme.html`](readme.html) for the full architecture, permission matrix, conflict-resolution table, and captured traces.
