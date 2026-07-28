@@ -1,7 +1,8 @@
-"""Conflict detection + all three resolution policies on canned fixtures.
-The llm_adjudicate policy's actual model call is monkeypatched out so this
-whole file runs offline in milliseconds - the live version is exercised in
-test_integration.py."""
+"""Conflict detection and all three resolution policies on canned fixtures.
+
+The LLM adjudicator is monkeypatched, so this file remains offline and fast.
+The live path is exercised separately by integration tests.
+"""
 
 from __future__ import annotations
 
@@ -15,10 +16,23 @@ from orchestrator.resolver import ResolvePolicy, detect_conflicts, resolve
 from tests.conftest import make_fake_tool, make_manifest
 
 
-def _result(tool: str, subtask_id: str, capability: str, data: dict, observed_at: float, ok: bool = True) -> ToolResult:
+def _result(
+    tool: str,
+    subtask_id: str,
+    capability: str,
+    data: dict,
+    observed_at: float,
+    ok: bool = True,
+) -> ToolResult:
     return ToolResult(
-        subtask_id=subtask_id, capability=capability, tool=tool, ok=ok, data=data,
-        started_at=0.0, finished_at=0.1, observed_at=observed_at,
+        subtask_id=subtask_id,
+        capability=capability,
+        tool=tool,
+        ok=ok,
+        data=data,
+        started_at=0.0,
+        finished_at=0.1,
+        observed_at=observed_at,
     )
 
 
@@ -56,10 +70,16 @@ def test_detect_conflicts_ignores_single_result_subtasks() -> None:
 
 @pytest.fixture
 def weather_registry() -> Registry:
-    reg = Registry()
-    reg.register(make_manifest("weather_a", capabilities=["weather.current"], priority=2), make_fake_tool())
-    reg.register(make_manifest("weather_b", capabilities=["weather.current"], priority=1), make_fake_tool())
-    return reg
+    registry = Registry()
+    registry.register(
+        make_manifest("weather_a", capabilities=["weather.current"], priority=2),
+        make_fake_tool(),
+    )
+    registry.register(
+        make_manifest("weather_b", capabilities=["weather.current"], priority=1),
+        make_fake_tool(),
+    )
+    return registry
 
 
 @pytest.fixture
@@ -74,60 +94,98 @@ def weather_conflict() -> Conflict:
     )
 
 
-async def test_priority_policy_picks_higher_priority_tool(weather_registry: Registry, weather_conflict: Conflict) -> None:
+def _lower_priority_first(conflict: Conflict) -> Conflict:
+    return conflict.model_copy(update={"results": list(reversed(conflict.results))})
+
+
+async def test_priority_policy_picks_higher_priority_tool(
+    weather_registry: Registry,
+    weather_conflict: Conflict,
+) -> None:
     resolutions = await resolve([weather_conflict], ResolvePolicy.PRIORITY, weather_registry)
     assert len(resolutions) == 1
-    assert resolutions[0].chosen_tool == "weather_a"  # priority=2 > priority=1
+    assert resolutions[0].chosen_tool == "weather_a"
     assert resolutions[0].policy == "priority"
     assert "priority" in resolutions[0].rationale.lower()
 
 
-async def test_freshest_policy_picks_latest_observed_at(weather_registry: Registry, weather_conflict: Conflict) -> None:
+async def test_freshest_policy_picks_latest_observed_at(
+    weather_registry: Registry,
+    weather_conflict: Conflict,
+) -> None:
     resolutions = await resolve([weather_conflict], ResolvePolicy.FRESHEST, weather_registry)
-    assert resolutions[0].chosen_tool == "weather_b"  # observed_at=500 > 100
+    assert resolutions[0].chosen_tool == "weather_b"
     assert resolutions[0].policy == "freshest"
 
 
 async def test_llm_adjudicate_uses_model_choice_and_rationale(
-    monkeypatch, weather_registry: Registry, weather_conflict: Conflict
+    monkeypatch,
+    weather_registry: Registry,
+    weather_conflict: Conflict,
 ) -> None:
     def fake_complete_json(schema, system_prompt, user_prompt):
-        return resolver_mod._Adjudication(choice="weather_b", rationale="Provider B's data is fresher.")
+        return resolver_mod._Adjudication(
+            choice="weather_b",
+            rationale="Provider B's data is fresher.",
+        )
 
     monkeypatch.setattr(resolver_mod, "complete_json", fake_complete_json)
 
-    resolutions = await resolve([weather_conflict], ResolvePolicy.LLM_ADJUDICATE, weather_registry)
+    resolutions = await resolve(
+        [weather_conflict],
+        ResolvePolicy.LLM_ADJUDICATE,
+        weather_registry,
+    )
 
     assert resolutions[0].chosen_tool == "weather_b"
     assert resolutions[0].rationale == "Provider B's data is fresher."
     assert resolutions[0].policy == "llm_adjudicate"
 
 
-async def test_llm_adjudicate_rejects_hallucinated_tool_name(
-    monkeypatch, weather_registry: Registry, weather_conflict: Conflict
+async def test_llm_adjudicate_rejects_hallucinated_tool_name_and_uses_priority(
+    monkeypatch,
+    weather_registry: Registry,
+    weather_conflict: Conflict,
 ) -> None:
-    """If the model names a tool that wasn't actually a candidate, fall
-    back to the first candidate rather than propagating garbage."""
-
     def fake_complete_json(schema, system_prompt, user_prompt):
-        return resolver_mod._Adjudication(choice="weather_z_made_up", rationale="not a real tool")
+        return resolver_mod._Adjudication(
+            choice="weather_z_made_up",
+            rationale="not a real tool",
+        )
 
     monkeypatch.setattr(resolver_mod, "complete_json", fake_complete_json)
+    conflict = _lower_priority_first(weather_conflict)
 
-    resolutions = await resolve([weather_conflict], ResolvePolicy.LLM_ADJUDICATE, weather_registry)
+    resolutions = await resolve(
+        [conflict],
+        ResolvePolicy.LLM_ADJUDICATE,
+        weather_registry,
+    )
 
-    assert resolutions[0].chosen_tool == weather_conflict.results[0].tool
+    assert conflict.results[0].tool == "weather_b"  # prove this is not first-item fallback
+    assert resolutions[0].chosen_tool == "weather_a"
+    assert "non-candidate" in resolutions[0].rationale.lower()
+    assert "priority" in resolutions[0].rationale.lower()
 
 
-async def test_llm_adjudicate_falls_back_gracefully_on_transport_error(
-    monkeypatch, weather_registry: Registry, weather_conflict: Conflict
+async def test_llm_adjudicate_transport_error_uses_priority_fallback(
+    monkeypatch,
+    weather_registry: Registry,
+    weather_conflict: Conflict,
 ) -> None:
     def failing_complete_json(schema, system_prompt, user_prompt):
         raise LLMError("connection refused")
 
     monkeypatch.setattr(resolver_mod, "complete_json", failing_complete_json)
+    conflict = _lower_priority_first(weather_conflict)
 
-    resolutions = await resolve([weather_conflict], ResolvePolicy.LLM_ADJUDICATE, weather_registry)
+    resolutions = await resolve(
+        [conflict],
+        ResolvePolicy.LLM_ADJUDICATE,
+        weather_registry,
+    )
 
-    assert resolutions[0].chosen_tool == weather_conflict.results[0].tool
+    assert conflict.results[0].tool == "weather_b"
+    assert resolutions[0].chosen_tool == "weather_a"
     assert "failed" in resolutions[0].rationale.lower()
+    assert "priority" in resolutions[0].rationale.lower()
